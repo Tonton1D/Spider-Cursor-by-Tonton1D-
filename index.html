@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title>Spider Cursor</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #000; overflow: hidden; cursor: none; }
+    canvas { display: block; background: #000; }
+  </style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+
+  window.addEventListener('resize', () => {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    // Redessine le fond noir après resize
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  });
+
+  let mouseX = canvas.width / 2;
+  let mouseY = canvas.height / 2;
+  window.addEventListener('mousemove', e => {
+    mouseX = e.clientX;
+    mouseY = e.clientY;
+  });
+
+  const body = { x: canvas.width / 2, y: canvas.height / 2 };
+
+  const stars = Array.from({ length: 180 }, () => ({
+    x: Math.random() * canvas.width,
+    y: Math.random() * canvas.height,
+    r: Math.random() * 1.4 + 0.3,
+    alpha: Math.random() * 0.5 + 0.15,
+    twinkle: Math.random() * Math.PI * 2,
+  }));
+
+  const NUM_LEGS = 8;
+
+  function findAnchorStar(bx, by, angle, minDist, maxDist) {
+    let best = null;
+    let bestScore = Infinity;
+    stars.forEach(s => {
+      const dx = s.x - bx;
+      const dy = s.y - by;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < minDist || dist > maxDist) return;
+      const starAngle = Math.atan2(dy, dx);
+      let diff = Math.abs(starAngle - angle);
+      if (diff > Math.PI) diff = Math.PI * 2 - diff;
+      const score = diff * 3 + dist * 0.01;
+      if (score < bestScore) { bestScore = score; best = s; }
+    });
+    return best;
+  }
+
+  let t = 0;
+
+  function clearCanvas() {
+    // Remplace clearRect par un fillRect noir pour éviter le flash blanc
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
+
+  function drawStars() {
+    stars.forEach(s => {
+      s.twinkle += 0.02;
+      const a = s.alpha * (0.7 + 0.3 * Math.sin(s.twinkle));
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(255,255,255,${a})`;
+      ctx.fill();
+    });
+  }
+
+  function drawLeg(startX, startY, endX, endY, midX, midY) {
+    // Bordure blanche
+    ctx.beginPath();
+    ctx.moveTo(startX, startY);
+    ctx.quadraticCurveTo(midX, midY, endX, endY);
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+    ctx.lineWidth = 4;
+    ctx.lineCap = 'round';
+    ctx.stroke();
+
+    // Intérieur noir
+    ctx.beginPath();
+    ctx.moveTo(startX, startY);
+    ctx.quadraticCurveTo(midX, midY, endX, endY);
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 2;
+    ctx.lineCap = 'round';
+    ctx.stroke();
+  }
+
+  function drawLegs() {
+    for (let i = 0; i < NUM_LEGS; i++) {
+      const side = i < 4 ? -1 : 1;
+      const idx = i < 4 ? i : i - 4;
+      const baseAngle = side * (0.35 + idx * 0.27);
+      const wave = Math.sin(t * 2 + i * 0.9) * 0.12;
+      const angle = baseAngle + wave;
+
+      const startX = body.x + Math.cos(angle) * 10;
+      const startY = body.y + Math.sin(angle) * 7;
+
+      const anchor = findAnchorStar(body.x, body.y, angle, 30, 160);
+
+      let endX, endY;
+      if (anchor) {
+        endX = anchor.x;
+        endY = anchor.y;
+        ctx.beginPath();
+        ctx.arc(anchor.x, anchor.y, 3, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(255,255,255,0.9)';
+        ctx.fill();
+      } else {
+        endX = body.x + Math.cos(angle) * 100;
+        endY = body.y + Math.sin(angle) * 80;
+      }
+
+      const midX = (startX + endX) / 2 + Math.cos(angle + Math.PI / 2) * 20 * side;
+      const midY = (startY + endY) / 2 + Math.sin(angle + Math.PI / 2) * 15;
+
+      drawLeg(startX, startY, endX, endY, midX, midY);
+    }
+  }
+
+  function drawBody() {
+    // Lueur
+    const grd = ctx.createRadialGradient(body.x, body.y, 2, body.x, body.y, 20);
+    grd.addColorStop(0, 'rgba(255,255,255,0.1)');
+    grd.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.beginPath();
+    ctx.arc(body.x, body.y, 20, 0, Math.PI * 2);
+    ctx.fillStyle = grd;
+    ctx.fill();
+
+    // Corps
+    ctx.beginPath();
+    ctx.arc(body.x, body.y, 9, 0, Math.PI * 2);
+    ctx.fillStyle = '#000';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Tête
+    const angle = Math.atan2(mouseY - body.y, mouseX - body.x);
+    const hx = body.x + Math.cos(angle) * 13;
+    const hy = body.y + Math.sin(angle) * 13;
+    ctx.beginPath();
+    ctx.arc(hx, hy, 5, 0, Math.PI * 2);
+    ctx.fillStyle = '#000';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
+
+  function animate() {
+    t += 0.016;
+
+    clearCanvas(); // fond noir au lieu de clearRect
+
+    drawStars();
+    body.x += (mouseX - body.x) * 0.1;
+    body.y += (mouseY - body.y) * 0.1;
+    drawLegs();
+    drawBody();
+
+    requestAnimationFrame(animate);
+  }
+
+  animate();
+</script>
+</body>
+</html>
