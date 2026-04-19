@@ -2,38 +2,138 @@
 <html lang="fr">
 <head>
   <meta charset="UTF-8">
-  <title>Spider Cursor</title>
+  <title>Spider Game</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { background: #000; overflow: hidden; cursor: none; }
     canvas { display: block; background: #000; }
+
+    #ui {
+      position: fixed;
+      top: 18px;
+      right: 24px;
+      color: #fff;
+      font-family: 'Courier New', monospace;
+      font-size: 22px;
+      font-weight: bold;
+      letter-spacing: 2px;
+      text-shadow: 0 0 8px rgba(255,255,255,0.5);
+      pointer-events: none;
+    }
+
+    #gameover {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.85);
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      font-family: 'Courier New', monospace;
+      text-align: center;
+    }
+    #gameover h1 {
+      font-size: 64px;
+      margin-bottom: 16px;
+      color: #ff4444;
+      text-shadow: 0 0 20px #ff0000;
+    }
+    #gameover p {
+      font-size: 26px;
+      margin-bottom: 32px;
+      opacity: 0.8;
+    }
+    #gameover button {
+      padding: 14px 40px;
+      font-size: 20px;
+      font-family: 'Courier New', monospace;
+      background: transparent;
+      color: #fff;
+      border: 2px solid #fff;
+      cursor: pointer;
+      letter-spacing: 2px;
+      transition: all 0.2s;
+    }
+    #gameover button:hover {
+      background: #fff;
+      color: #000;
+    }
   </style>
 </head>
 <body>
+
 <canvas id="c"></canvas>
+<div id="ui">⏱ <span id="timer">00:00</span></div>
+<div id="gameover">
+  <h1>🕷️ Bien joué !</h1>
+  <p>L'araignée t'a eu cette fois… Tu as tenu <span id="finalTime"></span> !</p>
+  <p style="font-size:18px; opacity:0.7; margin-top:-16px;">Continue, tu vas battre ton record 🔥</p>
+  <button onclick="restartGame()">↺ Rejouer &nbsp;[ G ]</button>
+</div>
+
 <script>
   const canvas = document.getElementById('c');
   const ctx = canvas.getContext('2d');
+  const timerEl = document.getElementById('timer');
+  const gameoverEl = document.getElementById('gameover');
+  const finalTimeEl = document.getElementById('finalTime');
+
   canvas.width = window.innerWidth;
   canvas.height = window.innerHeight;
 
   window.addEventListener('resize', () => {
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
-    ctx.fillStyle = '#000';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    stars = generateStars();
   });
 
+  // --- Souris ---
   let mouseX = canvas.width / 2;
   let mouseY = canvas.height / 2;
   window.addEventListener('mousemove', e => {
+    if (!gameActive) return;
     mouseX = e.clientX;
     mouseY = e.clientY;
   });
 
-  const body = { x: canvas.width / 2, y: canvas.height / 2 };
+  // --- Récupère le userId depuis l'URL ---
+  const urlParams = new URLSearchParams(window.location.search);
+  const userId = urlParams.get('userId') || null;
 
-  // --- Beaucoup plus d'étoiles sur tout l'écran ---
+  // --- URL du backend API ---
+  const API_URL = 'https://ton-backend.railway.app'; // ⚠️ à remplacer par ton URL Railway
+
+  // --- Envoie le score au backend ---
+  async function submitScore(score) {
+    if (!userId) return;
+    try {
+      await fetch(`${API_URL}/api/score`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, score }),
+      });
+      console.log(`[Score] Envoyé : ${userId} → ${score}ms`);
+    } catch (err) {
+      console.warn('[Score] Impossible d\'envoyer le score :', err.message);
+    }
+  }
+
+  // --- État du jeu ---
+  let gameActive = false;
+  let startTime = null;
+  let elapsedTime = 0;
+  let speed = 3;         // vitesse initiale de l'araignée
+  const MIN_DISTANCE = 60; // distance minimale araignée ↔ curseur
+  const COLLISION_DIST = 40; // distance de game over
+
+  // --- Corps de l'araignée ---
+  const spider = {
+    x: canvas.width / 2,
+    y: canvas.height / 2 + 200,
+  };
+
+  // --- Étoiles ---
   function generateStars() {
     const count = Math.floor((canvas.width * canvas.height) / 4000);
     return Array.from({ length: count }, () => ({
@@ -44,12 +144,7 @@
       twinkle: Math.random() * Math.PI * 2,
     }));
   }
-
   let stars = generateStars();
-
-  window.addEventListener('resize', () => {
-    stars = generateStars();
-  });
 
   const NUM_LEGS = 8;
   const legAnchors = Array(NUM_LEGS).fill(null);
@@ -69,6 +164,63 @@
       if (score < bestScore) { bestScore = score; best = s; }
     });
     return best;
+  }
+
+  // --- Timer ---
+  function formatTime(ms) {
+    const s = Math.floor(ms / 1000);
+    const m = Math.floor(s / 60);
+    const sec = s % 60;
+    return `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+  }
+
+  // --- Game Over ---
+  function triggerGameOver() {
+    gameActive = false;
+    const timeStr = formatTime(elapsedTime);
+    finalTimeEl.textContent = timeStr;
+    gameoverEl.style.display = 'flex';
+    submitScore(elapsedTime); // envoie le score au backend
+  }
+
+  // --- Restart ---
+  function restartGame() {
+    spider.x = canvas.width / 2;
+    spider.y = canvas.height / 2 + 200;
+    mouseX = canvas.width / 2;
+    mouseY = canvas.height / 2;
+    speed = 1.5;
+    // reset doux
+    elapsedTime = 0;
+    startTime = null;
+    legAnchors.fill(null);
+    gameoverEl.style.display = 'none';
+    timerEl.textContent = '00:00';
+    gameActive = true;
+  }
+
+  // --- Update araignée ---
+  function updateSpider() {
+    const dx = mouseX - spider.x;
+    const dy = mouseY - spider.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    // Accélération fluide et progressive
+    // 0s→1.5 | 30s→4 | 1min→7 | 2min→14 | 3min→ impossible
+    const seconds = elapsedTime / 1000;
+    const targetSpeed = 1.5 + Math.pow(seconds / 20, 1.8);
+    speed += (targetSpeed - speed) * 0.05;
+    speed = Math.min(speed, 40);
+
+    // Collision = game over (fonctionne même si curseur immobile)
+    if (dist < COLLISION_DIST) {
+      triggerGameOver();
+      return;
+    }
+
+    // L'araignée se rapproche toujours, même si le curseur ne bouge pas
+    spider.x += (dx / dist) * speed;
+    spider.y += (dy / dist) * speed;
   }
 
   let t = 0;
@@ -125,10 +277,10 @@
       const wave = Math.sin(t * 2 + i * 0.9) * 0.12;
       const angle = baseAngle + wave;
 
-      const startX = body.x + Math.cos(angle) * 10;
-      const startY = body.y + Math.sin(angle) * 7;
+      const startX = spider.x + Math.cos(angle) * 10;
+      const startY = spider.y + Math.sin(angle) * 7;
 
-      const anchor = findAnchorStar(body.x, body.y, angle, 30, 160);
+      const anchor = findAnchorStar(spider.x, spider.y, angle, 30, 160);
       if (anchor) legAnchors[i] = anchor;
 
       let endX, endY;
@@ -140,8 +292,8 @@
         ctx.fillStyle = 'rgba(255,255,255,0.95)';
         ctx.fill();
       } else {
-        endX = body.x + Math.cos(angle) * 100;
-        endY = body.y + Math.sin(angle) * 80;
+        endX = spider.x + Math.cos(angle) * 100;
+        endY = spider.y + Math.sin(angle) * 80;
       }
 
       const midX = (startX + endX) / 2 + Math.cos(angle + Math.PI / 2) * 20 * side;
@@ -151,26 +303,26 @@
     }
   }
 
-  function drawBody() {
-    const grd = ctx.createRadialGradient(body.x, body.y, 2, body.x, body.y, 20);
+  function drawSpiderBody() {
+    const grd = ctx.createRadialGradient(spider.x, spider.y, 2, spider.x, spider.y, 20);
     grd.addColorStop(0, 'rgba(255,255,255,0.1)');
     grd.addColorStop(1, 'rgba(0,0,0,0)');
     ctx.beginPath();
-    ctx.arc(body.x, body.y, 20, 0, Math.PI * 2);
+    ctx.arc(spider.x, spider.y, 20, 0, Math.PI * 2);
     ctx.fillStyle = grd;
     ctx.fill();
 
     ctx.beginPath();
-    ctx.arc(body.x, body.y, 9, 0, Math.PI * 2);
+    ctx.arc(spider.x, spider.y, 9, 0, Math.PI * 2);
     ctx.fillStyle = '#000';
     ctx.fill();
     ctx.strokeStyle = 'rgba(255,255,255,0.9)';
     ctx.lineWidth = 2;
     ctx.stroke();
 
-    const angle = Math.atan2(mouseY - body.y, mouseX - body.x);
-    const hx = body.x + Math.cos(angle) * 13;
-    const hy = body.y + Math.sin(angle) * 13;
+    const angle = Math.atan2(mouseY - spider.y, mouseX - spider.x);
+    const hx = spider.x + Math.cos(angle) * 13;
+    const hy = spider.y + Math.sin(angle) * 13;
     ctx.beginPath();
     ctx.arc(hx, hy, 5, 0, Math.PI * 2);
     ctx.fillStyle = '#000';
@@ -180,19 +332,54 @@
     ctx.stroke();
   }
 
-  function animate() {
+  // --- Curseur visible ---
+  function drawCursor() {
+    ctx.beginPath();
+    ctx.arc(mouseX, mouseY, 5, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.8)';
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(mouseX, mouseY, 12, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+
+  function animate(timestamp) {
     t += 0.016;
+
+    if (gameActive) {
+      if (!startTime) startTime = timestamp;
+      elapsedTime = timestamp - startTime;
+      timerEl.textContent = formatTime(elapsedTime);
+      updateSpider();
+    }
+
     clearCanvas();
     drawBackground();
     drawStars();
-    body.x += (mouseX - body.x) * 0.1;
-    body.y += (mouseY - body.y) * 0.1;
     drawLegs();
-    drawBody();
+    drawSpiderBody();
+    drawCursor();
+
     requestAnimationFrame(animate);
   }
 
-  animate();
+  // Démarre quand la souris bouge pour la première fois
+  window.addEventListener('mousemove', () => {
+    if (!gameActive && gameoverEl.style.display !== 'flex') {
+      gameActive = true;
+    }
+  }, { once: true });
+
+  // Touche G pour rejouer
+  window.addEventListener('keydown', e => {
+    if (e.key === 'g' || e.key === 'G') {
+      if (!gameActive) restartGame();
+    }
+  });
+
+  requestAnimationFrame(animate);
 </script>
 </body>
 </html>
